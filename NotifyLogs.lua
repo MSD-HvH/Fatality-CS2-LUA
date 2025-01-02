@@ -1,13 +1,15 @@
 local logs = gui.checkbox(gui.control_id('enable_logs'));
--- local debug_logs = gui.checkbox(gui.control_id('enable_debug'));
-local row = gui.make_control('Notify Logs', logs);
--- local test = gui.make_control('Debug Logs', debug_logs);
+local console_logs = gui.checkbox(gui.control_id('console_logs'));
+local c_logs = gui.make_control('Notify Logs', logs);
+local c_con_logs = gui.make_control('Console Logs', console_logs);
 local group = gui.ctx:find('lua>elements a');
--- local group_b = gui.ctx:find('lua>elements b');
-group:add(row);
--- group_b:add(test);
 
-local w, h = game.engine:get_screen_size();
+group:add(c_logs);
+group:reset();
+
+group:add(c_con_logs);
+group:reset();
+
 local hitgroup = {
 	[0] = 'generic',
 	[1] = 'head',
@@ -75,17 +77,19 @@ local weapon_name = {
 	['inferno'] = 'Fire'
 };
 
-local fuck_valve = {
-	['weapon_revolver'] = 'R8 Revolver',
-	['weapon_usp_silencer'] = 'USP-S',
-	['weapon_m4a1_silencer'] = 'M4A1-S'
-};
-
 setmetatable(weapon_name, {
     __index = function(_, key)
         return 'undefined';
     end
 });
+
+local fuck_valve = {
+	['weapon_revolver'] = 'R8 Revolver',
+	['weapon_usp_silencer'] = 'USP-S',
+	['weapon_m4a1_silencer'] = 'M4A1-S',
+	['weapon_mp5sd'] = 'MP5-SD',
+	['weapon_cz75a'] = 'CZ75-Auto'
+};
 
 setmetatable(fuck_valve, {
     __index = function(_, key)
@@ -107,32 +111,62 @@ setmetatable(bomb_events, {
     end
 });
 
-local function bomb_logs(event)
-	print('<'..
-		event:get_controller('userid'):get_name()..
-		'>'..
-		bomb_events[event:get_name()]);
+local round_events = {
+	['round_start'] = {'Round started!', 'Buy weapons and FIGHT!!!'},
+	['round_end'] = {'Round end.', 'Better luck next time.'}
+};
+
+setmetatable(round_events, {
+    __index = function(_, key)
+        return {key, 'undefined'};
+    end
+});
+
+local function bomb_logs(event, console, notify)
+	local userid = 'undefined';
 	
-	return gui.notify:add(gui.notification(
+	if event:get_controller('userid') ~= nil then
+		userid = event:get_controller('userid'):get_name();
+	end
+	
+	local message = '<'..
+		userid..
+		'>'..
+		bomb_events[event:get_name()];
+	
+	if console then
+		print(message);
+	end
+	
+	if notify then
+		gui.notify:add(gui.notification(
 		'<'..
-		event:get_controller('userid'):get_name()..
-		'>', 
+		userid..
+		'>',
 		bomb_events[event:get_name()], 
 		draw.textures['icon_visuals']));
+	end
 end
 
-local function hit_logs(event)
+local function hit_logs(event, console, notify)
 	local weapon = 'undefined';
+	local event_weapon = event:get_string('weapon');
+	local attacker_weapon = event:get_pawn_from_id('attacker'):get_active_weapon():get_data().name;
 	
-	if weapon_name[event:get_string('weapon')] ~= 'undefined' and 
-		fuck_valve[event:get_pawn_from_id('attacker'):get_active_weapon():get_data().name] == event:get_pawn_from_id('attacker'):get_active_weapon():get_data().name then
-		weapon = weapon_name[event:get_string('weapon')];
+	if weapon_name[event_weapon] ~= 'undefined' and fuck_valve[attacker_weapon] == attacker_weapon then
+		weapon = weapon_name[event_weapon];
 	else 
-		weapon = fuck_valve[event:get_pawn_from_id('attacker'):get_active_weapon():get_data().name];
+		weapon = fuck_valve[attacker_weapon];
+	end
+	
+	local userid = 'undefined';
+	
+	if event:get_controller('userid') ~= nil then
+		userid = event:get_controller('userid'):get_name();
 	end
 	
 	local message = 'Hit <'
-		..event:get_controller('userid'):get_name()..
+		..userid..
 		'> for '
 		..event:get_int('dmg_health')..
 		' ('
@@ -141,18 +175,28 @@ local function hit_logs(event)
 		..hitgroup[event:get_int('hitgroup')]..
 		' with '
 		..weapon;
-		
-	print(message);
-		
-	return gui.notify:add(gui.notification(
+	
+	if console then
+		print(message);
+	end
+	
+	if notify then
+		gui.notify:add(gui.notification(
 		'Hit!',
 		message,
 		draw.textures['icon_rage']));
+	end
 end
 
-local function hurt_logs(event)
+local function hurt_logs(event, console, notify)
+	local attacker = 'undefined';
+	
+	if event:get_controller('attacker') ~= nil then
+		attacker = event:get_controller('attacker'):get_name();
+	end
+	
 	local message = 'Hurt by <'
-		..event:get_controller('attacker'):get_name()..
+		..attacker..
 		'> for '
 		..event:get_int('dmg_health')..
 		' ('
@@ -161,40 +205,67 @@ local function hurt_logs(event)
 		..hitgroup[event:get_int('hitgroup')]..
 		' with '
 		..weapon_name[event:get_string('weapon')];
-		
-	print(message);
 	
-	return gui.notify:add(gui.notification(
+	if console then
+		print(message);
+	end
+	
+	if notify then
+	    gui.notify:add(gui.notification(
 		'Hurt!', 
 		message, 
 		draw.textures['icon_legit']));
+	end
 end
 
-local function round_logs(event)
-	return gui.notify:add(gui.notification(
-		'Round started!', 
-		'Buy weapons and FIGHT!!!', 
+local function round_logs(event, console, notify)
+	local event_name = event:get_name();
+	local message = round_events[event_name];
+
+	if event:get_string('message') ~= nil then
+		if string.find(event:get_string('message'), '_Terrorists') then
+			message[2] = 'Terrorists win!';
+		elseif string.find(event:get_string('message'), '_CTs_') then
+			message[2] = 'Counter-Terrorists win!';
+		end
+	end
+
+	if console then
+		print(message[1]..message[2]);
+	end
+	
+	if notify then
+		gui.notify:add(gui.notification(
+		message[1], 
+		message[2], 
 		draw.textures['icon_visuals']));
+	end
 end
 
 local function on_event(event)
-	if logs:get_value():get() then
-		if event:get_name() == 'player_hurt' then
+	local l = logs:get_value():get();
+	local c = console_logs:get_value():get();
+	local e = event:get_name();
+
+	if l or c then
+		if e == 'player_hurt' then
 			if event:get_controller('attacker') == entities.get_local_controller() then
-				return hit_logs(event);
+				return hit_logs(event, c, l);
 			elseif event:get_controller('userid') == entities.get_local_controller() then
-				return hurt_logs(event);
+				return hurt_logs(event, c, l);
 			end
 		end
 		
-		if event:get_name() == 'round_start' then
-			return round_logs(event);
+		if string.find(e, 'round_') then
+			return round_logs(event, c, l);
 		end
 		 
-		if string.find(event:get_name(), 'bomb_') then
-			return bomb_logs(event);
+		if string.find(e, 'bomb_') then
+			return bomb_logs(event, c, l);
 		end
 	end
 end
+
+mods.events:add_listener('round_end');
 
 events.event:add(on_event);
